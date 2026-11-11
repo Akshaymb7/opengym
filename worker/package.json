@@ -1,0 +1,17 @@
+{
+  "name": "opengym-cloudflare",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "openGym API on Cloudflare Workers + D1 (replaces api/server.js for a Cloudflare deployment)",
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "test": "node --test --no-warnings \"test/*.test.js\"",
+    "build:app": "cd ../frontend && npm run build && node ../scripts/catalogue/stage-media.mjs dist",
+    "dev": "wrangler dev",
+    "migrate:local": "wrangler d1 migrations apply opengym --local",
+    "migrate:remote": "wrangler d1 migrations apply opengym --remote",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@simplewebauthn/server": "1

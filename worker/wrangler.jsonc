@@ -1,0 +1,62 @@
+// openGym on Cloudflare: the built app (../frontend/dist, with the 180 px exercise media staged in)
+// is served as static assets; /api/* runs this Worker; everything is stored in D1.
+//
+// Secrets (set once, never committed):
+//   npx wrangler secret put SESSION_SECRET   # signs session cookies and phone tokens
+//   npx wrangler secret put SETUP_CODE       # one-time code that lets the first profile sign up
+{
+  "name": "opengym",
+  "main": "src/index.js",
+  "account_id": "a11330fe933a4f5eec087c953413e3b8",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "assets": {
+    "directory": "../frontend/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "opengym",
+      "database_id": "cb42370a-8b4a-4293-83f7-3cab200ddc93",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    // Passkeys are bound to this exact host. Changing it later means registering passkeys again
+    // (password sign-in keeps working).
+    "ORIGIN": "https://opengym.akshaymb121.workers.dev",
+    "RP_ID": "opengym.akshaymb121.workers.dev",
+    "RP_NAME": "openGym",
+    "INVITE_ONLY": "1",
+    "PASSWORD_LOGIN": "1",
+    "ALLOW_GUEST": "1",
+    "SESSION_DAYS": "90"
+  },
+  "observability": { "enabled": true },
+  "env": {
+    // `wrangler dev --env local`: same Worker on http://localhost:8787 against a local D1.
+    "local": {
+      "vars": {
+        "ORIGIN": "http://localhost:8787",
+        "RP_ID": "localhost",
+        "RP_NAME": "openGym (local)",
+        "INVITE_ONLY": "1",
+        "PASSWORD_LOGIN": "1",
+        "ALLOW_GUEST": "1",
+        "SESSION_DAYS": "90"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "opengym",
+          "database_id": "cb42370a-8b4a-4293-83f7-3cab200ddc93",
+          "migrations_dir": "migrations"
+        }
+      ]
+    }
+  }
+}
