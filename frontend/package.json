@@ -16,9 +16,9 @@
   "license": "AGPL-3.0-or-later",
   "dependencies": {
     "@aparajita/capacitor-secure-storage": "^8.0.1",
-    "@capacitor-mlkit/barcode-scanning": "^8.2.1",
+    "@capacitor-mlkit/barcode-scanning": "^8.2.2",
     "@capacitor/app": "^8.0.0",
-    "@capacitor/core": "^8.5.3",
+    "@capacitor/core": "^8.6.0",
     "@capacitor/filesystem": "^8.1.5",
     "@capacitor/local-notifications": "^8.0.0",
     "@capacitor/share": "^8.0.0",
@@ -28,19 +28,19 @@
     "lean-qr": "^2.7.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "react-router-dom": "^7.18.4",
-    "zustand": "^5.0.15"
+    "react-router-dom": "^7.18.5",
+    "zustand": "^5.1.0"
   },
   "devDependencies": {
-    "@capacitor/android": "^8.5.3",
-    "@capacitor/cli": "^8.5.3",
-    "@capacitor/ios": "^8.5.3",
-    "@vitejs/plugin-react": "^6.1.2",
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/cli": "^8.6.0",
+    "@capacitor/ios": "^8.6.0",
+    "@vitejs/plugin-react": "^6.2.1",
     "@vitest/coverage-v8": "^4.1.12",
     "fast-check": "^4.10.2",
     "happy-dom": "^20.14.6",
-    "linkedom": "^0.18.13",
-    "vite": "^8.3.4",
+    "linkedom": "^0.18.15",
+    "vite": "^8.3.6",
     "vitest": "^4.1.12"
   }
 }
