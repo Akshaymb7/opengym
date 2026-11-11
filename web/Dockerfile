@@ -26,7 +26,7 @@ COPY frontend/ ./
 ARG APP_BUILD=""
 RUN APP_BUILD="$APP_BUILD" npm run build
 
-FROM nginxinc/nginx-unprivileged:1.30.6-alpine
+FROM nginxinc/nginx-unprivileged:1.31.7-alpine
 # Same reason as in api/Dockerfile: alpine fixes land faster than the nginx image is rebuilt.
 # The base's last instruction is USER 101, and apk then exits 99 — it cannot open its log as
 # that user. Upgrade as root, then switch back. 101 has to be the last USER in this file so
