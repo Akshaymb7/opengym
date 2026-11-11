@@ -2,10 +2,10 @@
 // Ported from api/server.js; same answers and `code`s, which the app translates.
 import { verifyAuthenticationResponse } from '@simplewebauthn/server'
 import { verifyError, isMisconfigured } from '../../api/verify-error.js'
-import { json, text, fromB64u } from './http.js'
+import { json, text, fromB64u, sameString } from './http.js'
 import { readSession, sessionOf } from './session.js'
 import { nameKey, verifyPassword } from './password.js'
-import { throttleWait, throttleFail } from './repo.js'
+import { throttleAttempt, limitAddress, LIMITS } from './repo.js'
 
 export const isAdmin = u => !!u && u.admin === true
 export const isOwner = u => isAdmin(u) && u.owner === true
@@ -42,24 +42,42 @@ export async function signupGate(ctx, code) {
   const { cfg, repo } = ctx
   const first = (await repo.userCount()) === 0
   if (!cfg.INVITE_ONLY) return { first, invite: null }
-  if (first) return cfg.SETUP_CODE && code === cfg.SETUP_CODE ? { first, invite: null } : null
+  // A short setup code would be guessable before the owner signs up: one under 12 is ignored.
+  if (first) return cfg.SETUP_CODE.length >= 12 && sameString(code, cfg.SETUP_CODE) ? { first, invite: null } : null
   const invite = await repo.invite(code)
   return invite && !invite.usedBy && !invite.revoked ? { first, invite } : null
 }
 export const INVITE_REQUIRED = { error: 'a valid invite code is required', code: 'invite' }
 export const INVITE_GONE = { error: 'invite code is no longer valid, ask for a new one', code: 'invite' }
 
-// The new profile record, with the invite burned and the first profile made the owner.
+// The new profile record: the first profile is made the owner, an invite is recorded.
 export function newUser(gate, fields) {
-  const created = new Date().toISOString()
-  const user = { created, ...fields }
+  const user = { created: new Date().toISOString(), ...fields }
   if (gate.first) { user.admin = true; user.owner = true }
-  let invite = null
+  if (gate.invite) user.invitedBy = gate.invite.code
+  return user
+}
+
+// Stores a new profile only if its way in is still good, decided by the database itself so two
+// sign-ups at once cannot both use one invite, or both become the first profile (the owner).
+// Resolves to true when stored.
+export async function claimAndCreate(ctx, gate, user) {
+  const { db, repo } = ctx
   if (gate.invite) {
-    user.invitedBy = gate.invite.code
-    invite = { ...gate.invite, usedBy: user.id, usedAt: created }
+    const claimed = await db.prepare(`UPDATE invites SET data = json_set(data, '$.usedBy', ?, '$.usedAt', ?)
+      WHERE code = ? AND json_extract(data, '$.usedBy') IS NULL AND json_extract(data, '$.revoked') IS NULL`)
+      .bind(user.id, user.created, gate.invite.code).run()
+    if (claimed.meta.changes !== 1) return false
+    await repo.saveUser(user)
+    return true
   }
-  return { user, invite }
+  if (gate.first) {
+    const made = await db.prepare('INSERT INTO users (id, data, created) SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM users)')
+      .bind(user.id, JSON.stringify(user), user.created).run()
+    return made.meta.changes === 1
+  }
+  await repo.saveUser(user)
+  return true
 }
 
 /* ---------- names, e-mail and password sign-in ---------- */
@@ -82,19 +100,28 @@ export function loginTarget(users, body) {
   return { k, user, email: k.includes('@'), key: user ? 'acct:' + user.id : 'id:' + k }
 }
 
-const addrKey = ctx => 'ip:' + (ctx.request.headers.get('cf-connecting-ip') || 'local')
+export const addrKey = (ctx, kind) => kind + ':' + limitAddress(ctx.request.headers.get('cf-connecting-ip') || 'local')
 export const tooMany = wait => json(429, { error: 'too many tries, wait a moment and try again', code: 'throttled', retryAfter: wait }, { headers: { 'Retry-After': String(wait) } })
 
-// One password check against account key `k`, paused after repeated failures. Resolves to
-// { ok } or { res } (the 429).
+// One password check against account key `k`. The attempt is counted on the account and the
+// address before the hash runs; a right password gives it back. Resolves to { ok } or { res }.
 export async function checkPassword(ctx, k, pw, stored) {
-  const addr = addrKey(ctx)
-  const wait = await throttleWait(ctx.repo, [k, addr])
+  const addr = addrKey(ctx, 'ip')
+  const wait = await throttleAttempt(ctx.repo, [[k, LIMITS.account], [addr, LIMITS.address]])
   if (wait) return { res: tooMany(wait) }
   const ok = await verifyPassword(pw, stored)
-  if (ok) await ctx.repo.throttleClear(k)
-  else { await throttleFail(ctx.repo, k); await throttleFail(ctx.repo, addr) }
+  if (ok) { await ctx.repo.throttleClear(k); await ctx.repo.throttleUndo(addr) }
   return { ok }
+}
+
+// A wrong sign-up or setup code counts against the address; refused while paused.
+export async function signupPaused(ctx) {
+  const row = await ctx.repo.throttleRow(addrKey(ctx, 'signup'))
+  return row && row.until > Date.now() ? Math.ceil((row.until - Date.now()) / 1000) : 0
+}
+export async function signupRejected(ctx) {
+  const wait = await throttleAttempt(ctx.repo, [[addrKey(ctx, 'signup'), LIMITS.signup]])
+  return wait ? tooMany(wait) : json(403, INVITE_REQUIRED)
 }
 
 /* ---------- proof that the signed-in owner is here ---------- */

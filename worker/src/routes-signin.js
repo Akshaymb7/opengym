@@ -5,8 +5,8 @@ import { json, readBody, text, b64u, fromB64u, randomId } from './http.js'
 import { sessionOf, readSession, makeSession, sessionCookie, clearCookie, sessionVersion } from './session.js'
 import { hashPassword, needsRehash, passwordProblem, normalizeEmail } from './password.js'
 import {
-  publicUser, hasPassword, notSignedIn, WRONG, verifyAnswer, signupGate, newUser, INVITE_REQUIRED, INVITE_GONE,
-  nameTaken, emailTaken, loginTarget, checkPassword, proveOwner, stillSignedIn
+  publicUser, notSignedIn, WRONG, verifyAnswer, signupGate, newUser, claimAndCreate, INVITE_GONE,
+  nameTaken, emailTaken, loginTarget, checkPassword, proveOwner, stillSignedIn, signupPaused, signupRejected, tooMany
 } from './auth.js'
 
 const enc = new TextEncoder()
@@ -48,7 +48,9 @@ export const signinRoutes = {
     const name = text(body.name).trim().slice(0, 40)
     if (!name) return json(400, { error: 'name required' })
     const code = text(body.code).trim().toUpperCase()
-    if (!(await signupGate(ctx, code))) return json(403, INVITE_REQUIRED)
+    const paused = await signupPaused(ctx)
+    if (paused) return tooMany(paused)
+    if (!(await signupGate(ctx, code))) return signupRejected(ctx)
     const uid = randomId(12)
     const options = await generateRegistrationOptions({
       rpName: cfg.RP_NAME, rpID: cfg.RP_ID,
@@ -62,7 +64,7 @@ export const signinRoutes = {
   },
 
   'POST /api/register/verify': async ctx => {
-    const { cfg, repo, db } = ctx
+    const { cfg, repo } = ctx
     const body = await readBody(ctx.request)
     const c = await repo.takeChallenge(text(body.cid))
     if (!c || c.kind !== 'register' || !c.uid) return json(400, { error: 'challenge expired, try again', code: 'challenge-expired' })
@@ -79,15 +81,12 @@ export const signinRoutes = {
     // Checked again at the last moment: the invite may have been used or revoked since.
     const gate = await signupGate(ctx, c.code)
     if (!gate) return json(403, INVITE_GONE)
-    const { user, invite } = newUser(gate, { id: c.uid, name: c.name })
-    await db.batch([
-      repo.saveUserStmt(user),
-      repo.saveCredStmt({
-        id: credential.id, userId: user.id, publicKey: b64u(credential.publicKey), counter: credential.counter || 0,
-        transports: transportsOf(body.credential?.response?.transports), created: user.created, lastUsed: user.created
-      }),
-      ...(invite ? [repo.saveInviteStmt(invite)] : [])
-    ])
+    const user = newUser(gate, { id: c.uid, name: c.name })
+    if (!(await claimAndCreate(ctx, gate, user))) return json(403, INVITE_GONE)
+    await repo.saveCred({
+      id: credential.id, userId: user.id, publicKey: b64u(credential.publicKey), counter: credential.counter || 0,
+      transports: transportsOf(body.credential?.response?.transports), created: user.created, lastUsed: user.created
+    })
     return json(200, { user: publicUser(user) }, { cookies: await sessionCookie(cfg, user) })
   },
 
@@ -175,12 +174,14 @@ export const passwordSigninRoutes = {
   },
 
   'POST /api/register/password': async ctx => {
-    const { cfg, repo, db } = ctx
+    const { cfg, repo } = ctx
     const body = await readBody(ctx.request)
     const name = text(body.name).trim().slice(0, 40)
     if (!name) return json(400, { error: 'name required', code: 'missing' })
     const code = text(body.code).trim().toUpperCase()
-    if (!(await signupGate(ctx, code))) return json(403, INVITE_REQUIRED)
+    const paused = await signupPaused(ctx)
+    if (paused) return tooMany(paused)
+    if (!(await signupGate(ctx, code))) return signupRejected(ctx)
     const problem = passwordProblem(body.password, name)
     if (problem) return policyError(problem)
     const taken = () => json(409, { error: 'another profile already signs in with this name', code: 'name-taken' })
@@ -193,9 +194,9 @@ export const passwordSigninRoutes = {
     const users = await repo.users()
     if (nameTaken(users, name)) return taken()
     if (email && emailTaken(users, email)) return json(409, { error: 'another profile already uses this e-mail address', code: 'email-taken' })
-    const { user, invite } = newUser(gate, { id: randomId(12), name, ...(email ? { email } : {}) })
+    const user = newUser(gate, { id: randomId(12), name, ...(email ? { email } : {}) })
     user.pw = { h, set: user.created }
-    await db.batch([repo.saveUserStmt(user), ...(invite ? [repo.saveInviteStmt(invite)] : [])])
+    if (!(await claimAndCreate(ctx, gate, user))) return json(403, INVITE_GONE)
     return json(200, { user: publicUser(user) }, { cookies: await sessionCookie(cfg, user) })
   }
 }

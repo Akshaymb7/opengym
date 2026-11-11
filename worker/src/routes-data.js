@@ -25,7 +25,10 @@ async function putOnce(ctx, user, body) {
       (body.baseRev != null && typeof body.baseWid === 'string' && cur?._wid && body.baseWid !== cur._wid)) {
     return { res: json(409, { error: 'conflict', rev: curRev, state: forClient(cur) }) }
   }
-  const next = structuredClone(body.state)
+  // Copied only when the body may be reused: a write with no baseRev can return { retry: true }
+  // and run again. A write over a baseRev never retries, so it mutates body.state directly and
+  // skips a clone of the whole document on the hot path.
+  const next = body.baseRev == null ? structuredClone(body.state) : body.state
   delete next.active // in-progress workouts stay on the device
   // "Reset everything" only moves forward.
   const storedReset = Number(cur?.resetAt) || 0

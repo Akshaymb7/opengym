@@ -10,7 +10,17 @@ import { HttpError } from './http.js'
 export const PART = 500000
 export const KEEP_REVS = 10
 
-const split = s => { const out = []; for (let i = 0; i < s.length; i += PART) out.push(s.slice(i, i + PART)); return out.length ? out : [''] }
+// Never between a surrogate pair, or an emoji at a part boundary would read back as two U+FFFD.
+const split = s => {
+  const out = []
+  for (let i = 0; i < s.length;) {
+    let end = Math.min(i + PART, s.length)
+    if (end < s.length) { const c = s.charCodeAt(end); if (c >= 0xDC00 && c <= 0xDFFF) end-- }
+    out.push(s.slice(i, end))
+    i = end
+  }
+  return out.length ? out : ['']
+}
 
 export async function readMeta(db, uid) {
   return db.prepare('SELECT * FROM state_meta WHERE uid = ?').bind(uid).first()

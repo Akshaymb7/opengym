@@ -51,6 +51,7 @@ export function makeRepo(db) {
       await run('INSERT INTO challenges (cid, data, exp) VALUES (?, ?, ?)', cid, JSON.stringify(data), Date.now() + TTL_MS)
       // Housekeeping rides along: nothing else would ever clear the expired ones.
       await run('DELETE FROM challenges WHERE exp < ?', Date.now())
+      await r.throttleSweep()
       return cid
     },
     async takeChallenge(cid) {
@@ -76,31 +77,62 @@ export function makeRepo(db) {
     },
     async dropPairings(uid) { await run('DELETE FROM pairings WHERE uid = ?', uid) },
 
-    /* wrong-password pauses */
-    async throttleRow(key) { return one('SELECT fails, until FROM throttle WHERE key = ?', key) },
-    async throttleSet(key, fails, until) {
-      await run('INSERT OR REPLACE INTO throttle (key, fails, until, updated) VALUES (?, ?, ?, ?)', key, fails, until, Date.now())
+    /* attempt counters (wrong passwords, wrong sign-up codes) */
+    // One attempt, counted atomically BEFORE the work it guards, so attempts sent side by side
+    // cannot all start under the same allowance. Returns { fails, until }: `until` in the future
+    // means paused (the attempt was not counted then). A counter quiet for `forgetMs` starts over.
+    async throttleHit(key, { free, forgetMs }) {
+      return one(`INSERT INTO throttle (key, fails, until, updated) VALUES (?1, 1, 0, ?2)
+        ON CONFLICT(key) DO UPDATE SET
+          fails = CASE WHEN throttle.until > ?2 THEN throttle.fails
+                       WHEN ?2 - MAX(throttle.updated, throttle.until) > ?3 THEN 1
+                       ELSE throttle.fails + 1 END,
+          until = CASE WHEN throttle.until > ?2 THEN throttle.until
+                       WHEN ?2 - MAX(throttle.updated, throttle.until) > ?3 THEN 0
+                       WHEN throttle.fails + 1 > ?4 THEN ?2 + MIN(?5, 30000 * (1 << MIN(throttle.fails - ?4, 10)))
+                       ELSE 0 END,
+          updated = CASE WHEN throttle.until > ?2 THEN throttle.updated ELSE ?2 END
+        RETURNING fails, until`, key, Date.now(), forgetMs, free, MAX_WAIT_MS)
     },
-    async throttleClear(key) { await run('DELETE FROM throttle WHERE key = ?', key) }
+    async throttleRow(key) { return one('SELECT fails, until FROM throttle WHERE key = ?', key) },
+    // A right answer gives the attempt back.
+    async throttleUndo(key) { await run('UPDATE throttle SET fails = MAX(fails - 1, 0) WHERE key = ? AND until <= ?', key, Date.now()) },
+    async throttleClear(key) { await run('DELETE FROM throttle WHERE key = ?', key) },
+    async throttleSweep() { await run('DELETE FROM throttle WHERE until < ?1 AND updated < ?1 - ?2', Date.now(), DAY_MS) }
   }
   return r
 }
 
-// Sign-in pauses: a few free tries, then 30 s doubling up to 15 minutes. Counted per account and
-// per address (CF-Connecting-IP), checked before the hash is computed.
-const FREE = 5
+// Pauses: a few free attempts, then 30 s doubling up to 15 minutes; forgotten after a quiet spell.
+// Per account (5 free, a day) and per address (20 free, an hour), as in api/server.js.
 const MAX_WAIT_MS = 15 * 60000
-export async function throttleWait(repo, keys) {
+const DAY_MS = 24 * 3600000
+export const LIMITS = {
+  account: { free: 5, forgetMs: DAY_MS },
+  address: { free: 20, forgetMs: 3600000 },
+  signup: { free: 10, forgetMs: 3600000 }
+}
+// Counts one attempt on every key; resolves to the seconds to wait (0 = go ahead).
+export async function throttleAttempt(repo, hits) {
   let wait = 0
-  for (const k of keys) {
-    const row = await repo.throttleRow(k)
-    if (row && row.until > Date.now()) wait = Math.max(wait, row.until - Date.now())
+  for (const [key, limit] of hits) {
+    const row = await repo.throttleHit(key, limit)
+    if (row.until > Date.now()) wait = Math.max(wait, row.until - Date.now())
   }
   return Math.ceil(wait / 1000)
 }
-export async function throttleFail(repo, key) {
-  const row = await repo.throttleRow(key)
-  const fails = (row?.fails || 0) + 1
-  const until = fails >= FREE ? Date.now() + Math.min(MAX_WAIT_MS, 30000 * 2 ** (fails - FREE)) : 0
-  await repo.throttleSet(key, fails, until)
+
+// The address an attempt is counted against: an IPv6 address by its /64 (one connection's whole
+// prefix), an IPv4-mapped IPv6 as the IPv4 address (api/server.js limitAddress).
+export function limitAddress(raw) {
+  const ip = String(raw || '').trim().toLowerCase()
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return ip
+  const mapped = /^::ffff:(\d{1,3}(\.\d{1,3}){3})$/.exec(ip)
+  if (mapped) return mapped[1]
+  if (!ip.includes(':') || !/^[0-9a-f:]+$/.test(ip)) return 'unknown'
+  const [head, tail = ''] = ip.split('::')
+  const a = head ? head.split(':') : []
+  const b = tail ? tail.split(':') : []
+  const groups = ip.includes('::') ? [...a, ...Array(Math.max(0, 8 - a.length - b.length)).fill('0'), ...b] : a
+  return groups.slice(0, 4).map(g => g.replace(/^0+(?=.)/, '')).join(':') + '::/64'
 }
