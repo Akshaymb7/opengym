@@ -294,6 +294,34 @@ test('passkey ceremonies hand out options for this host', async () => {
   assert.equal(v2.body.code, 'challenge-expired')
 })
 
+test('a sign-in e-mail: set with the password, signs in, unique, removable', async () => {
+  const env = makeEnv()
+  const owner = await signup(env, 'Akshay', PW, 'SETUP-CODE-1')
+  const code = (await call(env, 'POST', '/api/admin/invites/new', { as: owner, body: {} })).body.invite.code
+  const friend = await signup(env, 'Rahul', 'squat deep every day', code)
+  const setEmail = (as, body) => call(env, 'POST', '/api/account/email', { as, body })
+
+  assert.equal((await setEmail(owner, { email: 'nope', current: PW })).body.code, 'email-invalid')
+  assert.equal((await setEmail(owner, { email: 'a@example.com' })).body.code, 'current-required')
+  assert.equal((await setEmail(owner, { email: 'a@example.com', current: 'wrong one' })).body.code, 'current-wrong')
+  const set = await setEmail(owner, { email: ' A@Example.com ', current: PW })
+  assert.equal(set.status, 200)
+  assert.equal(set.body.email, 'a@example.com')
+  assert.equal((await call(env, 'GET', '/api/account/password', { as: owner })).body.email, 'a@example.com')
+
+  const login = await call(env, 'POST', '/api/login/password', { body: { identifier: 'a@example.com', password: PW } })
+  assert.equal(login.status, 200)
+
+  const taken = await setEmail(friend, { email: 'a@example.com', current: 'squat deep every day' })
+  assert.equal(taken.status, 409)
+  assert.equal(taken.body.code, 'email-taken')
+
+  assert.equal((await call(env, 'DELETE', '/api/account/email', { as: owner, body: {} })).body.code, 'current-required')
+  const removed = await call(env, 'DELETE', '/api/account/email', { as: owner, body: { current: PW } })
+  assert.equal(removed.body.email, null)
+  assert.equal((await call(env, 'POST', '/api/login/password', { body: { identifier: 'a@example.com', password: PW } })).status, 401)
+})
+
 test('password settings and deleting the profile', async () => {
   const env = makeEnv()
   const owner = await signup(env, 'Akshay', PW, 'SETUP-CODE-1')

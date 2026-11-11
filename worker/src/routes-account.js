@@ -1,10 +1,13 @@
-// Settings → Account: passkeys, the password, deleting the profile.
+// Settings → Account: passkeys, the password, the sign-in e-mail, deleting the profile.
 import { generateRegistrationOptions, verifyRegistrationResponse } from '@simplewebauthn/server'
 import { listPasskeys, addPasskeyRecord, renamePasskeyRecord, passkeyRemovalRefused, removePasskeyRecord, MAX_PASSKEYS } from '../../api/passkeys-store.js'
 import { json, readBody, text, b64u } from './http.js'
 import { sessionOf, readSession, makeSession, sessionCookie, clearCookie, sessionVersion } from './session.js'
-import { hashPassword, passwordProblem } from './password.js'
-import { hasPassword, passwordWayIn, notSignedIn, verifyAnswer, isAdmin, nameTaken, proveOwner, stillSignedIn } from './auth.js'
+import { hashPassword, passwordProblem, normalizeEmail } from './password.js'
+import {
+  hasPassword, passwordWayIn, notSignedIn, verifyAnswer, isAdmin, nameTaken, emailTaken, proveOwner, stillSignedIn, addrKey, tooMany
+} from './auth.js'
+import { throttleAttempt, LIMITS } from './repo.js'
 import { policyError } from './routes-signin.js'
 
 const enc = new TextEncoder()
@@ -15,6 +18,29 @@ const passkeyState = (cfg, u, creds) => {
   const pw = passwordWayIn(cfg, u)
   return { passkeys, password: pw, lastWayIn: passkeys.length + (pw ? 1 : 0) <= 1 }
 }
+const EMAIL_INVALID = { error: 'that is not an e-mail address', code: 'email-invalid' }
+const EMAIL_TAKEN = { error: 'another profile already uses this e-mail address', code: 'email-taken' }
+
+// Seconds left on the longest pause among `keys`, without counting an attempt.
+async function pausedFor(repo, keys) {
+  let wait = 0
+  for (const [key] of keys) {
+    const row = await repo.throttleRow(key)
+    if (row && row.until > Date.now()) wait = Math.max(wait, row.until - Date.now())
+  }
+  return Math.ceil(wait / 1000)
+}
+
+async function removeEmail(ctx, user, body) {
+  if (!user.email) return json(200, { ok: true, email: null })
+  const p = await proveOwner(ctx, user, body)
+  if (p.res) return p.res
+  if (!(await stillSignedIn(ctx, user))) return notSignedIn()
+  delete user.email
+  await ctx.repo.saveUser(user)
+  return json(200, { ok: true, email: null })
+}
+
 async function lastAdminLeaving(repo, u) {
   if (!isAdmin(u)) return false
   const users = await repo.users()
@@ -169,6 +195,40 @@ export const passwordAccountRoutes = {
     await repo.throttleClear('acct:' + user.id)
     if (s.bearer) return json(200, { ok: true, token: await makeSession(cfg, user) })
     return json(200, { ok: true }, { cookies: await sessionCookie(cfg, user) })
+  },
+
+  // Set or change the address this profile may sign in with; `email` empty or null removes it.
+  // The same proof as a password (proveOwner). An address already in use is refused only after
+  // the proof and counts against the caller's account and address, as in api/server.js.
+  'POST /api/account/email': async ctx => {
+    const { repo } = ctx
+    const s = await sessionOf(ctx)
+    if (!s) return notSignedIn()
+    const { user } = s
+    const body = await readBody(ctx.request)
+    if (body.email == null || (typeof body.email === 'string' && body.email.trim() === '')) return removeEmail(ctx, user, body)
+    const email = normalizeEmail(body.email)
+    if (!email) return json(400, EMAIL_INVALID)
+    if (email === user.email) return json(200, { ok: true, email })
+    const keys = [['email:acct:' + user.id, LIMITS.address], [addrKey(ctx, 'email'), LIMITS.address]]
+    let wait = await pausedFor(repo, keys)
+    if (wait) return tooMany(wait)
+    const p = await proveOwner(ctx, user, body)
+    if (p.res) return p.res
+    if (!(await stillSignedIn(ctx, user))) return notSignedIn()
+    if (emailTaken(await repo.users(), email, user.id)) {
+      wait = await throttleAttempt(repo, keys)
+      return wait ? tooMany(wait) : json(409, EMAIL_TAKEN)
+    }
+    user.email = email
+    await repo.saveUser(user)
+    return json(200, { ok: true, email })
+  },
+
+  'DELETE /api/account/email': async ctx => {
+    const user = await readSession(ctx)
+    if (!user) return notSignedIn()
+    return removeEmail(ctx, user, await readBody(ctx.request))
   },
 
   'DELETE /api/account/password': async ctx => {
