@@ -41,31 +41,6 @@
   "ai": { "binding": "AI" },
   "observability": { "enabled": true },
   "env": {
-    // `wrangler deploy --env staging`: a separate test site (Worker "opengym-staging") with its own
-    // empty D1, to try a change on the phone before it reaches the live site. Secrets are its own:
-    //   npx wrangler secret put SESSION_SECRET --env staging
-    //   npx wrangler secret put SETUP_CODE --env staging
-    "staging": {
-      "workers_dev": true,
-      "vars": {
-        "ORIGIN": "https://opengym-staging.akshaymb121.workers.dev",
-        "RP_ID": "opengym-staging.akshaymb121.workers.dev",
-        "RP_NAME": "openGym (test)",
-        "INVITE_ONLY": "1",
-        "PASSWORD_LOGIN": "1",
-        "ALLOW_GUEST": "1",
-        "SESSION_DAYS": "90"
-      },
-      "ai": { "binding": "AI" },
-      "d1_databases": [
-        {
-          "binding": "DB",
-          "database_name": "opengym-staging",
-          "database_id": "a70653ca-a4cb-4c5e-8fba-ecef6187cae3",
-          "migrations_dir": "migrations"
-        }
-      ]
-    },
     // `wrangler dev --env local`: same Worker on http://localhost:8787 against a local D1.
     "local": {
       "vars": {
