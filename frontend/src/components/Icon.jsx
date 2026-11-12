@@ -202,6 +202,8 @@ const P = {
   webhook: <><circle cx="12" cy="6.4" r="2.6" /><circle cx="6.2" cy="16.8" r="2.6" /><circle cx="17.8" cy="16.8" r="2.6" /><path d="M10.7 8.7 7.5 14.5M13.3 8.7l3.2 5.8M8.8 16.8h6.4" /></>,
   ring: <><circle cx="12" cy="13.8" r="6.4" /><path d="m9.7 5.4 2.3-1.8 2.3 1.8-2.3 1.8Z" /></>,
   chat: <path d="M5.6 4.8h12.8a2.2 2.2 0 0 1 2.2 2.2v8a2.2 2.2 0 0 1-2.2 2.2H11l-4.4 3.4v-3.4h-1a2.2 2.2 0 0 1-2.2-2.2V7a2.2 2.2 0 0 1 2.2-2.2Z" />,
+  // Meals (views/Meals.jsx): a fork beside a knife
+  fork: <path d="M7 3.5v5.5a2 2 0 0 0 2 2 2 2 0 0 0 2-2V3.5M9 3.5v17M16.5 20.5V3.5c-2 1-3 3.5-3 6.5 0 2 1 3 3 3" />,
 }
 
 export const ICON_NAMES = Object.keys(P)

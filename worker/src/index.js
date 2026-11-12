@@ -11,6 +11,7 @@ import { cookieToken, sessionUser } from './session.js'
 import { signinRoutes, passwordSigninRoutes } from './routes-signin.js'
 import { accountRoutes, passwordAccountRoutes } from './routes-account.js'
 import { dataRoutes } from './routes-data.js'
+import { mealRoutes } from './routes-meals.js'
 
 export function routesFor(cfg) {
   return {
@@ -18,7 +19,9 @@ export function routesFor(cfg) {
     ...accountRoutes,
     ...dataRoutes,
     // Absent while PASSWORD_LOGIN is off, so each is a plain 404 (as in api/server.js).
-    ...(cfg.PASSWORD_LOGIN ? { ...passwordSigninRoutes, ...passwordAccountRoutes } : {})
+    ...(cfg.PASSWORD_LOGIN ? { ...passwordSigninRoutes, ...passwordAccountRoutes } : {}),
+    // Absent without an AI binding: the app hides Meals then (/api/config `meals`).
+    ...(cfg.MEALS ? mealRoutes : {})
   }
 }
 

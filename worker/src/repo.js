@@ -18,7 +18,7 @@ export function makeRepo(db) {
     async userCount() { return (await one('SELECT COUNT(*) AS n FROM users')).n },
     saveUserStmt(u) { return db.prepare('INSERT OR REPLACE INTO users (id, data, created) VALUES (?, ?, ?)').bind(u.id, JSON.stringify(u), u.created || new Date().toISOString()) },
     async saveUser(u) { await r.saveUserStmt(u).run() },
-    // Everything of an account: the record, its passkeys, codes and its whole training history.
+    // Everything of an account: the record, its passkeys, codes, its whole training history and meals.
     async deleteUser(id) {
       await db.batch([
         db.prepare('DELETE FROM users WHERE id = ?').bind(id),
@@ -26,7 +26,10 @@ export function makeRepo(db) {
         db.prepare('DELETE FROM pairings WHERE uid = ?').bind(id),
         db.prepare('DELETE FROM state_parts WHERE uid = ?').bind(id),
         db.prepare('DELETE FROM state_meta WHERE uid = ?').bind(id),
-        db.prepare('DELETE FROM state_writes WHERE uid = ?').bind(id)
+        db.prepare('DELETE FROM state_writes WHERE uid = ?').bind(id),
+        db.prepare('DELETE FROM meals WHERE uid = ?').bind(id),
+        db.prepare('DELETE FROM meal_prefs WHERE uid = ?').bind(id),
+        db.prepare('DELETE FROM ai_usage WHERE uid = ?').bind(id)
       ])
     },
 

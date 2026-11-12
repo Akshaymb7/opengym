@@ -1,9 +1,12 @@
 // A D1 stand-in over node:sqlite (same SQL engine as D1), and a client for handleApi().
 import { DatabaseSync } from 'node:sqlite'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { handleApi } from '../src/index.js'
 
-const SCHEMA = readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8')
+// Every migration, in order, as wrangler applies them.
+const MIGRATIONS = new URL('../migrations/', import.meta.url)
+const SCHEMA = readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).sort()
+  .map(f => readFileSync(new URL(f, MIGRATIONS), 'utf8')).join('\n')
 
 export function fakeD1() {
   const db = new DatabaseSync(':memory:')
@@ -37,6 +40,21 @@ export function fakeD1() {
 }
 
 export const ORIGIN = 'https://gym.test'
+
+// A Workers AI stand-in: answers with `reply` (a value, or a function of the input), records
+// every call in `calls`, and throws when `reply` is an Error.
+export function fakeAI(reply) {
+  const ai = {
+    calls: [],
+    async run(model, input) {
+      ai.calls.push({ model, input })
+      const r = typeof reply === 'function' ? reply(input, ai.calls.length) : reply
+      if (r instanceof Error) throw r
+      return r
+    }
+  }
+  return ai
+}
 
 export function makeEnv(over = {}) {
   return {

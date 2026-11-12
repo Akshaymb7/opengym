@@ -22,6 +22,11 @@ export function configOf(env) {
     // invite yet. Ignored once any profile exists.
     SETUP_CODE: String(env.SETUP_CODE || '').trim().toUpperCase(),
     // PBKDF2 rounds for new password hashes. 100,000 is the most Workers allow.
-    PBKDF2_ITER: Math.min(100000, Math.max(10000, +(env.PBKDF2_ITER || 100000) || 100000))
+    PBKDF2_ITER: Math.min(100000, Math.max(10000, +(env.PBKDF2_ITER || 100000) || 100000)),
+    // Meals with photo reading: on when the Worker has an AI binding, unless MEALS=0.
+    MEALS: !!env.AI && !off(env.MEALS),
+    AI_MODEL: String(env.AI_MODEL || '@cf/meta/llama-4-scout-17b-16e-instruct'),
+    // Photos one profile may have read a day, so one person cannot spend everyone's free allowance.
+    MEALS_AI_DAILY: Math.min(200, Math.max(1, +(env.MEALS_AI_DAILY || 20) || 20))
   }
 }

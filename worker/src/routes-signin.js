@@ -29,7 +29,9 @@ export const signinRoutes = {
       ...(cfg.DEFAULT_LANG ? { default_lang: cfg.DEFAULT_LANG } : {}),
       // No Coach on this server: the key is there (null) for a session, which is how the app
       // tells "no Coach here" from "asked before signing in".
-      ...(signedIn ? { coach: null } : {})
+      ...(signedIn ? { coach: null } : {}),
+      // Meals with photo reading (routes-meals.js), for a session only like the Coach's key.
+      ...(signedIn && cfg.MEALS ? { meals: true } : {})
     })
   },
 
